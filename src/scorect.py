@@ -2,7 +2,7 @@
 
 # Lucas Seninge (lseninge)
 # Group members: Lucas Seninge
-# Last updated: 01-04-2019
+# Last updated: 01-05-20190
 # File: scorect.py
 # Purpose: Automated scoring of cell types in scRNA-seq.
 # Author: Lucas Seninge (lseninge@ucsc.edu)
