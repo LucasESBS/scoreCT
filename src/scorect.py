@@ -3,7 +3,7 @@
 # Lucas Seninge (lseninge)
 # Group members: Lucas Seninge
 # Last updated: 01-04-2019
-# File: celltype_scorer.py
+# File: scorect.py
 # Purpose: Automated scoring of cell types in scRNA-seq.
 # Author: Lucas Seninge (lseninge@ucsc.edu)
 # Credits for help to: NA
@@ -90,20 +90,96 @@ def wrangle_ranked_genes(anndata):
     return marker_df
 
 
-def score_clusters(ranked_marker, nb_marker, ref_marker, bin_size=20):
+def _parse_ref(path, species, organ, context=None, comments=False):
+    """
+    Parses the ref file of specified species into relevant information specified by user.
+
+    This function takes the big reference file for marker/cell types of the specified species and return a formatted
+    table of the relevant fields for automated cell type annotation.
+
+    Args:
+        path (str): Path to directory with big reference.
+        species (str): Specie of interest.
+        organ (str): Organ of interest.
+        context (str): Context of data. If None, default to 'healthy' for healthy tissue.
+        comments (boolean): print comments of retained genes. Default to False.
+
+    Returns:
+        ref_df (pandas.df): Parsed reference dataframe.
+    """
+
+    import itertools
+
+    if context is None:
+        context = 'healthy'
+    # Read csv of relevant specied
+    specie_df = pd.read_csv(path + species + '.tsv', sep='\t', index_col=False)
+
+    # Get relevant organ and relevant context
+    sub_df = specie_df[specie_df['Organ'] == organ]
+    sub_df = sub_df[sub_df['Context'] == context]
+
+    # Create new dataframe ref_df from parsed information
+    list_ct = sub_df['Cell Type/ Cell State'].unique().tolist()
+    dict_marker = {
+        ct: [gene for gene in sub_df[sub_df['Cell Type/ Cell State'] == ct]['Gene name(s)'].unique().tolist()]
+        for ct in list_ct}
+
+    # If several gene per row, we need to parse commas
+    for ct in dict_marker.keys():
+        temp_list = []
+        for gene in dict_marker[ct]:
+            if ',' in gene:
+                temp_list.append(gene.split(','))
+            else:
+                temp_list.append(gene)
+        # Slight modification to avoid spelling strings
+        dict_marker[ct] = list(
+            itertools.chain.from_iterable(itertools.repeat(x, 1) if isinstance(x, str) else x for x in temp_list))
+
+    # Use dict to initialize df. Here order in memory doesn't mess with loading.
+    ref_df = pd.DataFrame({ct: pd.Series(genes) for ct, genes in dict_marker.items()})
+
+    # Print comments if needed
+    if comments:
+        for i, row in sub_df.iterrows():
+            print(row['Gene name(s)'], row['Comment'])
+
+    return ref_df
+
+
+def score_clusters(ranked_marker, nb_marker, path=None,
+                   species='human', organ='brain',
+                   context=None, comments=False,
+                   user_ref=None, bin_size=20):
+
     """
     Assign a score to each cell type for each cluster in the data.
+
+    More description on usage here.
 
     Args:
         ranked_marker (pandas.df): A dataframe with ranked markers (from wrangle_ranked_genes()).
         nb_marker (int): number of top markers retained per cluster.
-        ref_marker (pandas.df): A dataframe with a list of known markers per curated cell types.
+        path (str): Path to directory with provided reference (see GitHub).
+        species (str): Specie of interest. Default to 'human'.
+        organ (str): Organ of interest. Default to 'brain'.
+        context (str): Context of data. If None, default to 'healthy' for healthy tissue.
+        comments (boolean): print comments of retained genes. Default to False.
+        user_ref (pandas.df): If specified, uses a custom reference file provided by user,
+        as a dataframe with a list of known markers per curated cell types.
         bin_size (int): size of bins to score.
 
     Return:
           dict_scores (dict): Dictionary with louvain clusters as keys and a dictionary of cell type:score as values.
           (eg: 1:{CT_1: 0, CT_2:3} ...})
     """
+
+    # Use user reference if specified, otherwise get data of specified species/organ/context
+    if user_ref is not None:
+        ref_marker = user_ref
+    else:
+        ref_marker = _parse_ref(path=path, species=species, organ=organ, context=context, comments=comments)
 
     # Initialize score dictionary {cluster_1: {cell_type1: X, cell_type2: Y} ...}
     dict_scores = {}
@@ -130,6 +206,34 @@ def score_clusters(ranked_marker, nb_marker, ref_marker, bin_size=20):
                     dict_scores[clust][cell_type] = score_i
 
     return dict_scores
+
+
+def _highlight_max(s):
+    """
+    Highlights the maximum in a Series yellow.
+    From Pandas package tutorial (https://pandas.pydata.org/pandas-docs/stable/style.html)
+    """
+    is_max = s == s.max()
+    return ['background-color: yellow' if v else '' for v in is_max]
+
+
+def scoring_summary(scoring_dict):
+    """
+    Produces a summary of the scoring function after scoring clusters with cell types.
+
+    Args:
+        scoring_dict (dict): Output from score_clusters() as a dictionary. See corresponding function.
+
+    Returns:
+        prints a pandas dataframe with highlighted best scores.
+    """
+    # Import matplotlib to trigger font cache stuff
+    import matplotlib.pyplot
+
+    summary_df = pd.DataFrame(scoring_dict)
+    print('Rows: Cell types / Columns: Clusters')
+    return summary_df.style.apply(_highlight_max)
+
 
 
 def assign_celltypes(anndata, dict_scores):
