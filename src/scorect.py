@@ -2,7 +2,7 @@
 
 # Lucas Seninge (lseninge)
 # Group members: Lucas Seninge
-# Last updated: 01-05-20190
+# Last updated: 01-04-2019
 # File: scorect.py
 # Purpose: Automated scoring of cell types in scRNA-seq.
 # Author: Lucas Seninge (lseninge@ucsc.edu)
@@ -54,6 +54,9 @@ sc.pl.tsne(adata, color='Assigned type')
 
 # Import packages
 import pandas as pd
+import requests
+import itertools
+import re
 
 
 def wrangle_ranked_genes(anndata):
@@ -108,8 +111,6 @@ def _parse_ref(path, species, organ, context=None, comments=False):
         ref_df (pandas.df): Parsed reference dataframe.
     """
 
-    import itertools
-
     if context is None:
         context = 'healthy'
     # Read csv of relevant specied
@@ -144,6 +145,41 @@ def _parse_ref(path, species, organ, context=None, comments=False):
     if comments:
         for i, row in sub_df.iterrows():
             print(row['Gene name(s)'], row['Comment'])
+
+    return ref_df
+
+
+def use_cellmarkerdb(species, tissue):
+    """
+    Accesses the cellmarker database (http://biocc.hrbmu.edu.cn/CellMarker/index.jsp)
+    Paper: Zhang et al., 2019 (https://academic.oup.com/nar/article/47/D1/D721/5115823)
+    """
+    req = requests.get("http://biocc.hrbmu.edu.cn/CellMarker/download/all_cell_markers.txt")
+    parsed_file = []
+    for chunk in req.iter_lines():
+        chunk = chunk.decode("utf-8").split('\t')
+        parsed_file.append(chunk)
+
+    marker_df = pd.DataFrame(columns=parsed_file[0], data=parsed_file[1:])
+
+    # Subset for interesting information
+    sub_df = marker_df[marker_df['speciesType'] == species]
+    sub_df = sub_df[sub_df['tissueType'] == tissue]
+
+    # Parse information to create new reference
+    list_ct = sub_df['cellName'].unique().tolist()
+    # Use re to remove special characters
+    dict_marker = {
+        ct: [re.split('\W+', gene) for gene in sub_df[sub_df['cellName'] == ct]['geneSymbol'].unique().tolist()]
+        for ct in list_ct}
+
+    # merge nested lists without spelling strings
+    for ct in dict_marker.keys():
+        dict_marker[ct] = list(
+            itertools.chain.from_iterable(itertools.repeat(x, 1) if isinstance(x, str) else x for x in dict_marker[ct]))
+
+    # Use dict to initialize df. Here order in memory doesn't mess with loading.
+    ref_df = pd.DataFrame({ct: pd.Series(genes) for ct, genes in dict_marker.items()})
 
     return ref_df
 
@@ -233,7 +269,6 @@ def scoring_summary(scoring_dict):
     summary_df = pd.DataFrame(scoring_dict)
     print('Rows: Cell types / Columns: Clusters')
     return summary_df.style.apply(_highlight_max)
-
 
 
 def assign_celltypes(anndata, dict_scores):
