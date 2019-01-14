@@ -1,24 +1,43 @@
-Organ	Context	Gene name(s)	Cell Type/ Cell State	Comment	Source	
-brain	healthy	EOMES,HES1	IPC			
-brain	cancer	GFAP	Glioblastoma			
-brain	healthy	OLIG1	Oligodendrocyte			
-heart	healthy	TNT2	Cardiomyocyte
-brain	healthy	SOX2	IPC
-			
-						
-						
-						
-						
-						
-						
-						
-						
-						
-						
-						
-						
-						
-						
-						
-						
-						
+	Organ	Context	Gene name(s)	Cell Type/ Cell State	Comment	Source	Curator
+0	brain	healthy	EOMES,HES1	Intermediate Progenitor Cells	test		Lucas
+1	brain	cancer	GFAP	Glioblastoma	to be removed		Lucas
+2	brain	healthy	OLIG1	Oligodendrocyte	test		Lucas
+3	heart	healthy	TNNT2,TTN	Cardiomyocyte	test		Eli
+4	brain	healthy	SOX2	Intermediate Progenitor Cells	test		Lucas
+5	brain	healthy	ABCG2	Neural stem cells	Aparna's table		Lucas
+6	brain	healthy	CXCR4	Neural stem cells	Aparna's table		Lucas
+7	brain	healthy	FGFR4	Neural stem cells	Aparna's table		Lucas
+8	brain	healthy	FZD1	Neural stem cells	Aparna's table		Lucas
+9	brain	healthy	GLUT1	Neural stem cells	Aparna's table		Lucas
+10	brain	healthy	NOTCH1	Neural stem cells	Aparna's table		Lucas
+11	brain	healthy	NOTCH2	Neural stem cells	Aparna's table		Lucas
+12	brain	healthy	CD15	Neural stem cells	Aparna's table		Lucas
+13	brain	healthy	CD133,BMI1,SMARCA4,FABP7,MSI1,MSI2NES,NEUROD1,GNL3,SOX1,SOX2,SOX9,VIM,NEUROD6,SOX9,NEUROD6	Neural stem cells	Aparna's table		Lucas
+14	brain	healthy	SLC1A3,FABP7,NES,PAX6,SOX2,VIM,GLI3,PDGFD,HES1,PTN,EMX2,NNAT,TLE4	Radial Glia Cells	Aparna's table		Lucas
+15	brain	healthy	A2B5,FGFR1,GFAP,NES,NCAM1,TUBB3	Glial-Restricted Cells	Aparna's table		Lucas
+16	brain	healthy	CD44,SLC1A3,FGFR1,GFAP,NES,NCAM1,TUBB3	Type 1 Astrocytes	Aparna's table		Lucas
+17	brain	healthy	A2B5,CD44,SLC1A3,GFAP,S100B	Type 2 Astrocytes	Aparna's table		Lucas
+18	brain	healthy	A2B5,CSPG4,PDGFRA,NES,CLDN11	O2A	Aparna's table		Lucas
+19	brain	healthy	OLIG2,EZH2,GALC,MOG,NKX2-2,SOX10	Oligodendrocyte	Aparna's table		Lucas
+20	brain	healthy	ISL1,ISL2,NEUROG2,OLIG2	Motor Neuron Progenitors	Aparna's table		Lucas
+21	brain	healthy	NCAM1,TUBB3,MAP2	Neuron-restricted Progenitors	Aparna's table		Lucas
+22	brain	healthy	CHAT,ISL1,ISL2,NEUROG2,OLIG2,HB9	Motor Neurons	Aparna's table		Lucas
+23	brain	healthy	MAP2,NEFL,NEFM,DLG4,SYP,NR1A2	Glutamatergic Neurons	Aparna's table		Lucas
+24	brain	healthy	PPP1R1B,GAD2,GAD1,NEFL,NEFM,DLG4,VAMP2	GABAergic Neurons	Aparna's table		Lucas
+25	brain	healthy	NEFL,NEFM,NR4A2,PAX2,PAX6,DLG4,TH,VAMP2,VMAT2	Dopaminergic Neurons	Aparna's table		Lucas
+26	brain	healthy	RELN,EOMES,NHLH1,LHX9	Cajal-Retzius Neurons	Aparna's table		Lucas
+27	brain	healthy	HES3,NR2F1,LIN28	Neuroepithelium	Aparna's table		Lucas
+28	heart	healthy	TNNT2,TTN,NR2F1,KCNA5	Atrial Cardiomyocytes	Chi Lab		Lucas
+29	heart	healthy	TNNT2,TTN,NR2F1,KCNA5,PITX2	Left Atrial Cardiomyocytes	Chi Lab		Lucas
+30	heart	healthy	TNNT2,TTN,MYL2	Ventricular Cardiomyocytes	Chi Lab		Lucas
+31	heart	healthy	TNNT2,TTN,MYL2,HEY2	Compact Ventricular Cardiomyocytes	Chi Lab		Lucas
+32	heart	healthy	TNNT2,TTN,MYL2,NPPA	Trabecular Ventricular Cardiomyocytes	Chi Lab		Lucas
+33	heart	healthy	TNNT2,TTN,SHOX2	Conduction Cardiomyocytes	Chi Lab		Lucas
+34	heart	healthy	ACTA2,PDGFRB,TAGLN	Smooth Muscle Cell	Chi Lab		Lucas
+35	heart	healthy	COL1A1,TCF21	Fibroblast	Chi Lab		Lucas
+36	heart	healthy	WT1,TBX18,TCF21	Epicardial	Chi Lab		Lucas
+37	heart	healthy	GYPA,HBB	Blood Cells	Chi Lab		Lucas
+38	heart	healthy	PTPRC	Immune	Chi Lab		Lucas
+39	heart	healthy	CLDN5,PECAM1	Vascular Endothelial	Chi Lab		Lucas
+40	heart	healthy	PECAM1,NPR3,LEPR	Endocardial	Chi Lab		Lucas
+41	heart	healthy	NKX2-5,GATA4,GATA6,TBX20,MESP1,ISL1,SMARCD3,TBX5,MEF2C,GATA,GATA5,MYOCD,SRF,HAND1,HAND2,IRX4,BMP2,BMP4,DKK1,LBH	Cardiac Progenitors	Chi Lab		Lucas
