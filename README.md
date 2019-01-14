@@ -33,3 +33,6 @@ See the jupyter notebook in the example folder to run an example. Example data a
 cd scoreCT/example
 jupyter notebook
 ```
+
+### News
+It is now possible to use the Cell Marker database (Zhang et al., 2019 : http://biocc.hrbmu.edu.cn/CellMarker/) as a reference for cell types / markers. See example notebook Option 3 on how to use it.
