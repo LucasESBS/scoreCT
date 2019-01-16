@@ -54,10 +54,13 @@ sc.pl.tsne(adata, color='Assigned type')
 
 # Import packages
 import pandas as pd
+import numpy as np
 import requests
 import itertools
 import re
 
+
+# WRANGLE & PARSE REF #############
 
 def wrangle_ranked_genes(anndata):
     """
@@ -153,7 +156,15 @@ def use_cellmarkerdb(species, tissue):
     """
     Accesses the cellmarker database (http://biocc.hrbmu.edu.cn/CellMarker/index.jsp)
     Paper: Zhang et al., 2019 (https://academic.oup.com/nar/article/47/D1/D721/5115823)
+
+    Args:
+        species (str): Query species.
+        tissue (str): Query tissue.
+
+    Returns:
+        ref_df (pandas.df): Dataframe with celltypes as columns and gene in rows.
     """
+
     req = requests.get("http://biocc.hrbmu.edu.cn/CellMarker/download/all_cell_markers.txt")
     parsed_file = []
     for chunk in req.iter_lines():
@@ -184,13 +195,14 @@ def use_cellmarkerdb(species, tissue):
     return ref_df
 
 
+# SCORING #############
+
 def score_clusters(ranked_marker, nb_marker, path=None,
                    species='human', organ='brain',
                    context=None, comments=False,
-                   user_ref=None, bin_size=20):
-
+                   user_ref=None, bin_size=20, random_sampling=1000):
     """
-    Assign a score to each cell type for each cluster in the data.
+    Assign a p-value and a score to each cell type for each cluster in the data.
 
     More description on usage here.
 
@@ -205,10 +217,13 @@ def score_clusters(ranked_marker, nb_marker, path=None,
         user_ref (pandas.df): If specified, uses a custom reference file provided by user,
         as a dataframe with a list of known markers per curated cell types.
         bin_size (int): size of bins to score.
+        random_sampling (int): Number of iterations for re-scoring and stats with random genes. Default to 1000.
 
     Return:
-          dict_scores (dict): Dictionary with louvain clusters as keys and a dictionary of cell type:score as values.
-          (eg: 1:{CT_1: 0, CT_2:3} ...})
+        stat_dict (dict): Dictionary with louvain clusters as keys and a dictionary of cell type:p-val as values.
+        (eg: 1:{CT_1: 0.01, CT_2:0.5} ...})
+        ref_score (dict): Dictionary with louvain clusters as keys and a dictionary of cell type:score as values.
+        (eg: 1:{CT_1: 0, CT_2:3} ...})
     """
 
     # Use user reference if specified, otherwise get data of specified species/organ/context
@@ -216,6 +231,61 @@ def score_clusters(ranked_marker, nb_marker, path=None,
         ref_marker = user_ref
     else:
         ref_marker = _parse_ref(path=path, species=species, organ=organ, context=context, comments=comments)
+
+    # Call _score_iter() method to get initial scores for actual gene ranking.
+    ref_score = _score_iter(ranked_marker=ranked_marker,
+                            nb_marker=nb_marker,
+                            ref_df=ref_marker,
+                            bin_size=bin_size)
+
+    # Iterate for K iterations and get number of time scores are superior to initial scores with random genes.
+    # Get list of gene to randomize ranking. HUMAN ONLY NOW
+    gene_list = open('../data/human_genelist.txt').read().split('\n')
+    gene_list = gene_list[1:]
+
+    # Empty count dict for stats
+    count_dict = {clust: {ct: 0 for ct in ref_score[clust]} for clust in ref_score.keys()}
+
+    for i in range(random_sampling):
+        # Right now, we randomize on the whole ranked dataframe, with all cluster.
+        # Maybe better to randomize cluster by cluster?
+        i_dict = _score_iter(randomize_genes(ranked_marker, gene_list),
+                             nb_marker=nb_marker,
+                             ref_df=ref_marker,
+                             bin_size=bin_size)
+        # Check for better score in randomized ranking score dict - NAIVE IMPLEMENTATION
+        for clust in ref_score.keys():
+            for ct in ref_score[clust].keys():
+                if i_dict[clust][ct] >= ref_score[clust][ct]:
+                    count_dict[clust][ct] += 1
+
+    # Divide by number of iterations
+    stat_dict = {clust: {ct: (float(count) / random_sampling) for ct, count in count_dict[clust].items()
+                         } for clust in count_dict.keys()}
+
+    # Correct for multiple testing - to debug to avoid 1 * 18 = 18
+    # stat_dict = _correct_pval(stat_dict)
+
+    return stat_dict, ref_score
+
+
+def _score_iter(ranked_marker, nb_marker, ref_df, bin_size):
+    """
+    Get scores for gene ranking of clusters given a reference of cell types/markers.
+
+    The gene ranking for cluster i is divided into bins of given size and a score is given for each gene of the
+    reference present in the ranking (score is depending of the bin: linearly scaled).
+
+    Args:
+        ranked_marker (pandas.df): A dataframe with ranked markers (from wrangle_ranked_genes()).
+        nb_marker (int): number of top markers retained per cluster.
+        ref_df (pandas.df): Reference dataframe with a cell type per column and a gene per row.
+        bin_size (int): size of bins to score.
+
+    Returns:
+        dict_scores (dict): Dictionary with louvain clusters as keys and a dictionary of cell type:score as values.
+        (eg: 1:{CT_1: 0, CT_2:3} ...})
+    """
 
     # Initialize score dictionary {cluster_1: {cell_type1: X, cell_type2: Y} ...}
     dict_scores = {}
@@ -231,10 +301,10 @@ def score_clusters(ranked_marker, nb_marker, path=None,
             bin_df = sub_df[(k * bin_size):bin_size + (k * bin_size)]
             # Use ref to score
             # We assume format column = cell types, each row is a different marker
-            for cell_type in list(ref_marker):
+            for cell_type in list(ref_df):
                 # Get length of intersection between ref marker and bin , multiply by score of the associated bin
                 # score_list[-(1+k)] because k can be 0 for bin purposes
-                score_i = score_list[-(1 + k)] * len(set(ref_marker[cell_type]).intersection(set(bin_df['gene'])))
+                score_i = score_list[-(1 + k)] * len(set(ref_df[cell_type]).intersection(set(bin_df['gene'])))
                 # Add score to existing score or create key
                 if cell_type in dict_scores[clust]:
                     dict_scores[clust][cell_type] += score_i
@@ -244,11 +314,57 @@ def score_clusters(ranked_marker, nb_marker, path=None,
     return dict_scores
 
 
+# STATS #############
+
+def randomize_genes(marker_df, gene_list):
+    """
+    Replaces genes in original data by random genes for rescoring.
+
+    TO ADD: MOUSE GENES.
+
+    Args:
+        marker_df (pandas.df): gene ranking for louvain clusters in original data.
+        gene_list (list): List of all possible *human* genes.
+
+    Returns:
+        copy_df (pandas.df): randomized gene ranking for louvain clusters.
+    """
+
+    copy_df = marker_df.copy()
+    # add code here to process cluster by cluster instead of the whole df in one time
+    rd_pick = np.random.choice(gene_list, len(copy_df['gene']))
+    copy_df['gene'] = rd_pick
+    return copy_df
+
+
+def _correct_pval(dict_scores):
+    """
+    Correct p-values for multiple testing.
+
+    Args:
+        dict_scores (dict): dictionary of [scores,p-val] per cluster/cell_types.
+
+    Return:
+        dict_scores (dict): input with corrected p-value.
+    """
+
+    n_test = len(dict_scores.keys())
+    for clust in dict_scores.keys():
+        for ct in dict_scores[clust].keys():
+            # Multiply by number of cell types
+            dict_scores[clust][ct] *= n_test
+
+    return dict_scores
+
+
+# SUMMARY #############
+
 def _highlight_max(s):
     """
     Highlights the maximum in a Series yellow.
     From Pandas package tutorial (https://pandas.pydata.org/pandas-docs/stable/style.html)
     """
+
     is_max = s == s.max()
     return ['background-color: yellow' if v else '' for v in is_max]
 
@@ -263,22 +379,24 @@ def scoring_summary(scoring_dict):
     Returns:
         prints a pandas dataframe with highlighted best scores.
     """
-    # Import matplotlib to trigger font cache stuff
-    import matplotlib.pyplot
 
     summary_df = pd.DataFrame(scoring_dict)
     print('Rows: Cell types / Columns: Clusters')
     return summary_df.style.apply(_highlight_max)
 
 
-def assign_celltypes(anndata, dict_scores):
+# ASSIGN #############
+
+def assign_celltypes(anndata, dict_stats, dict_scores, pval_thrsh=0.1):
     """
     Given a dictionary of cell type scoring for each cluster, assign cell type with max. score
     to given cluster.
 
     Args:
         anndata (AnnData object): Scanpy object with analyzed data (clustered cells).
+        dict_stats (dict):
         dict_scores (dict): Dictionary of cell type scoring per cluster.
+        pval_thrsh ()
 
     Returns:
         anndata (AnnData object): Scanpy object with assigned cell types.
@@ -286,14 +404,19 @@ def assign_celltypes(anndata, dict_scores):
 
     # Initialize new metadata column in Anndata object
     anndata.obs['Assigned type'] = ''
-    # Iterate on clusters in dict_scores
-    for cluster in dict_scores.keys():
-        # Get cell type with best score
-        max_value = max(dict_scores[cluster].values())
-        if len({key for key, value in dict_scores[cluster].items() if value == max_value}) > 1:
+    # Iterate on clusters in dict_stats
+    for cluster in dict_stats.keys():
+        # Get cell type with lowest pval
+        # Add pval threshold. Default to pval=0.1
+        min_value = min(dict_stats[cluster].values())
+        if min_value > pval_thrsh:
             assign_type = 'NA'
-        else:
+        elif len({key for key, value in dict_stats[cluster].items() if value == min_value}) > 1:
+            # If ties, get best score
+            # Add ties here too ?
             assign_type = max(dict_scores[cluster], key=dict_scores[cluster].get)
+        else:
+            assign_type = min(dict_stats[cluster], key=dict_stats[cluster].get)
         # Update
         anndata.obs.loc[anndata.obs['louvain'] == str(cluster), 'Assigned type'] = assign_type
 
