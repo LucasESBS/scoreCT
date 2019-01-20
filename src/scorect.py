@@ -195,6 +195,29 @@ def use_cellmarkerdb(species, tissue):
     return ref_df
 
 
+def _get_genelist(species):
+    """
+    Accesses list of species' genes from public server. Supported species: human, mouse.
+
+    Args:
+        species (str): Name of the species of interest.
+
+    Returns:
+        gene_list (list): List of all genes.
+    """
+    # Convert name to lowercase to access
+    species = species.lower()
+    response = requests.get('http://public.gi.ucsc.edu/~lseninge/' + species + '_genes.tsv')
+    gene_list = []
+    lines = response.iter_lines()
+    # Skip first line
+    next(lines)
+    for chunk in lines:
+        chunk = chunk.decode("utf-8")
+        gene_list.append(chunk)
+
+    return gene_list
+
 # SCORING #############
 
 def score_clusters(ranked_marker, nb_marker, path=None,
@@ -239,9 +262,8 @@ def score_clusters(ranked_marker, nb_marker, path=None,
                             bin_size=bin_size)
 
     # Iterate for K iterations and get number of time scores are superior to initial scores with random genes.
-    # Get list of gene to randomize ranking. HUMAN ONLY NOW
-    gene_list = open('../data/human_genelist.txt').read().split('\n')
-    gene_list = gene_list[1:]
+    # Get list of gene to randomize ranking. human by default. human and mouse available.
+    gene_list = _get_genelist(species=species)
 
     # Empty count dict for stats
     count_dict = {clust: {ct: 0 for ct in ref_score[clust]} for clust in ref_score.keys()}
