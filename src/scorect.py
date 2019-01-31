@@ -58,6 +58,7 @@ import numpy as np
 import requests
 import itertools
 import re
+import matplotlib.pyplot as plt
 
 
 # WRANGLE & PARSE REF #############
@@ -77,8 +78,8 @@ def wrangle_ranked_genes(anndata):
 
     # Get number of top ranked genes per groups
     nb_marker = len(anndata.uns['rank_genes_groups']['names'])
-    print('Number of markers used in ranked_gene_groups: ', nb_marker)
-
+    print('Wrangling: Number of markers used in ranked_gene_groups: ', nb_marker)
+    print('Wrangling: Groups used for ranking:', anndata.uns['rank_genes_groups']['params']['groupby'])
     # Wrangle results into a table (pandas dataframe)
     top_score = pd.DataFrame(anndata.uns['rank_genes_groups']['scores']).loc[:nb_marker]
     top_adjpval = pd.DataFrame(anndata.uns['rank_genes_groups']['pvals_adj']).loc[:nb_marker]
@@ -220,7 +221,8 @@ def _get_genelist(species):
 
 # SCORING #############
 
-def score_clusters(ranked_marker, nb_marker, path=None,
+
+def score_clusters(anndata, path=None,
                    species='human', organ='brain',
                    context=None, comments=False,
                    user_ref=None, bin_size=20, random_sampling=1000):
@@ -230,8 +232,7 @@ def score_clusters(ranked_marker, nb_marker, path=None,
     More description on usage here.
 
     Args:
-        ranked_marker (pandas.df): A dataframe with ranked markers (from wrangle_ranked_genes()).
-        nb_marker (int): number of top markers retained per cluster.
+        anndata (Anndata object): object from Scanpy analysis.
         path (str): Path to directory with provided reference (see GitHub).
         species (str): Specie of interest. Default to 'human'.
         organ (str): Organ of interest. Default to 'brain'.
@@ -243,19 +244,35 @@ def score_clusters(ranked_marker, nb_marker, path=None,
         random_sampling (int): Number of iterations for re-scoring and stats with random genes. Default to 1000.
 
     Return:
-        stat_dict (dict): Dictionary with louvain clusters as keys and a dictionary of cell type:p-val as values.
-        (eg: 1:{CT_1: 0.01, CT_2:0.5} ...})
-        ref_score (dict): Dictionary with louvain clusters as keys and a dictionary of cell type:score as values.
-        (eg: 1:{CT_1: 0, CT_2:3} ...})
+        anndata (Anndata object): object from Scanpy analysis updated with .uns slot 'scoreCT':
+            'pval_dict':
+            stat_dict (dict): Dictionary with louvain clusters as keys and a dictionary of cell type:p-val as values.
+            (eg: 1:{CT_1: 0.01, CT_2:0.5} ...})
+            'score_dict':
+            ref_score (dict): Dictionary with louvain clusters as keys and a dictionary of cell type:score as values.
+            (eg: 1:{CT_1: 0, CT_2:3} ...})
     """
 
+    # Check if required are present
+    if not (not ('louvain' not in anndata.obs) or not ('leiden' not in anndata.obs)) or 'rank_genes_groups' not in anndata.uns:
+        return 'Error: No clustering solution OR gene ranking found. Please perform scanpy.tl.louvain or' \
+               'scanpy.tl.leiden for clustering, and sc.tl.rank_genes_groups for differential gene expression.'
+
+    # Get number of markers from anndata object
+    nb_marker = len(anndata.uns['rank_genes_groups']['names'])
+    # Get ranking of genes from DGE in scanpy object
+    print('scoreCT: Wrangling gene ranking...')
+    ranked_marker = wrangle_ranked_genes(anndata)
+
     # Use user reference if specified, otherwise get data of specified species/organ/context
+    print('scoreCT: Parsing reference...')
     if user_ref is not None:
         ref_marker = user_ref
     else:
         ref_marker = _parse_ref(path=path, species=species, organ=organ, context=context, comments=comments)
 
     # Call _score_iter() method to get initial scores for actual gene ranking.
+    print('scoreCT: Computing scores...')
     ref_score = _score_iter(ranked_marker=ranked_marker,
                             nb_marker=nb_marker,
                             ref_df=ref_marker,
@@ -287,8 +304,11 @@ def score_clusters(ranked_marker, nb_marker, path=None,
 
     # Correct for multiple testing - to debug to avoid 1 * 18 = 18
     # stat_dict = _correct_pval(stat_dict)
+    print('scoreCT: Saving results to Anndata object...')
+    anndata.uns['scoreCT'] = {'pval_dict':stat_dict, 'score_dict':ref_score,
+                              'clustering':anndata.uns['rank_genes_groups']['params']['groupby']}
 
-    return stat_dict, ref_score
+    return 'DONE'
 
 
 def _score_iter(ranked_marker, nb_marker, ref_df, bin_size):
@@ -381,65 +401,78 @@ def _correct_pval(dict_scores):
 
 # SUMMARY #############
 
-def _highlight_max(s):
+
+def pval_plot(anndata, clusters):
     """
-    Highlights the maximum in a Series yellow.
-    From Pandas package tutorial (https://pandas.pydata.org/pandas-docs/stable/style.html)
-    """
-
-    is_max = s == s.max()
-    return ['background-color: yellow' if v else '' for v in is_max]
-
-
-def scoring_summary(scoring_dict):
-    """
-    Produces a summary of the scoring function after scoring clusters with cell types.
-
+    Plot of p-values for given cluster.
     Args:
-        scoring_dict (dict): Output from score_clusters() as a dictionary. See corresponding function.
+        anndata (Anndata object). Scanpy object with score dictionaries present.
+        clusters (int or list of int): Number of the louvain cluster to check.
 
-    Returns:
-        prints a pandas dataframe with highlighted best scores.
     """
+    import seaborn as sns
 
-    summary_df = pd.DataFrame(scoring_dict)
-    print('Rows: Cell types / Columns: Clusters')
-    return summary_df.style.apply(_highlight_max)
+    # If only one cluster is input as int, convert to list
+    if type(clusters) == int:
+        clusters = list(clusters)
+    if 'scoreCT' not in anndata.uns:
+        return 'scoreCT results not found. Please perform the scoreCT analysis function first.'
+
+    pval_thrsh = anndata.uns['scoreCT']['pval_thrsh']
+
+    for cluster in clusters:
+        # Convert to int if user use str
+        cluster = int(cluster)
+        # Sort by value
+        data = pd.DataFrame.from_dict(anndata.uns['scoreCT']['pval_dict'][cluster], orient='index')
+        data = data.sort_values(by=0)
+        lists = sorted(anndata.uns['scoreCT']['pval_dict'][cluster].items(), key=lambda kv: kv[1])
+        x, y = zip(*lists)
+        # Plot with pval threshold
+        sns.barplot(x=data.index, y=0, data=data, palette='Blues_d')
+        plt.axhline(y=pval_thrsh, color='r', label='Threshold')
+        plt.legend()
+        plt.xticks(rotation=90)
+        plt.ylim(0, 2*pval_thrsh)
+        plt.title('P-value plot for cluster ' + str(cluster))
+        plt.show()
 
 
 # ASSIGN #############
 
-def assign_celltypes(anndata, dict_stats, dict_scores, pval_thrsh=0.1):
+
+def assign_celltypes(anndata, pval_thrsh=0.1):
     """
     Given a dictionary of cell type scoring for each cluster, assign cell type with max. score
     to given cluster.
 
     Args:
         anndata (AnnData object): Scanpy object with analyzed data (clustered cells).
-        dict_stats (dict):
-        dict_scores (dict): Dictionary of cell type scoring per cluster.
-        pval_thrsh ()
+        pval_thrsh (int): p-value threshold for NA values.
 
     Returns:
         anndata (AnnData object): Scanpy object with assigned cell types.
     """
 
+    # Get clustering method used in ranked_genes_groups
+    clust_method = anndata.uns['scoreCT']['clustering']
     # Initialize new metadata column in Anndata object
     anndata.obs['Assigned type'] = ''
     # Iterate on clusters in dict_stats
-    for cluster in dict_stats.keys():
+    for cluster in anndata.uns['scoreCT']['pval_dict'].keys():
         # Get cell type with lowest pval
         # Add pval threshold. Default to pval=0.1
-        min_value = min(dict_stats[cluster].values())
+        min_value = min(anndata.uns['scoreCT']['pval_dict'][cluster].values())
         if min_value > pval_thrsh:
             assign_type = 'NA'
-        elif len({key for key, value in dict_stats[cluster].items() if value == min_value}) > 1:
+        elif len({key for key, value in anndata.uns['scoreCT']['pval_dict'][cluster].items() if value == min_value}) > 1:
             # If ties, get best score
             # Add ties here too ?
-            assign_type = max(dict_scores[cluster], key=dict_scores[cluster].get)
+            assign_type = max(anndata.uns['scoreCT']['score_dict'][cluster], key=anndata.uns['scoreCT']['score_dict'][cluster].get)
         else:
-            assign_type = min(dict_stats[cluster], key=dict_stats[cluster].get)
+            assign_type = min(anndata.uns['scoreCT']['pval_dict'][cluster], key=anndata.uns['scoreCT']['pval_dict'][cluster].get)
         # Update
-        anndata.obs.loc[anndata.obs['louvain'] == str(cluster), 'Assigned type'] = assign_type
+        anndata.obs.loc[anndata.obs[clust_method] == str(cluster), 'Assigned type'] = assign_type
+        anndata.uns['scoreCT']['pval_thrsh'] = pval_thrsh
 
     return "Cell types assigned in Anndata.obs['Assigned types']"
