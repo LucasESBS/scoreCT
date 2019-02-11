@@ -30,7 +30,7 @@ cell type in the reference table, for each louvain cluster. A dictionary of scor
 
 Finally, the assign_celltypes() method takes the score dictionary and the Anndata object to assign the cell type with
 the best score to each cluster. NA is assigned if there is a tie of 2 or more cell types, to avoid bias. The Anndata
-object is automatically updated under Anndata.obs['Assigned type'].
+object is automatically updated under Anndata.obs['scorect'].
 
 Example usage:
 # Import scanpy and read previously analyzed object saved to .h5
@@ -49,7 +49,7 @@ ct.assign_celltypes(adata, dict_score)
 
 # Verify and plot t-SNE
 print(adata.obs)
-sc.pl.tsne(adata, color='Assigned type')
+sc.pl.tsne(adata, color='scorect')
 """
 
 # Import packages
@@ -432,6 +432,7 @@ def pval_plot(anndata, clusters):
         sns.barplot(x=data.index, y=0, data=data, palette='Blues_d')
         plt.axhline(y=pval_thrsh, color='r', label='Threshold')
         plt.legend()
+        plt.ylabel('P-value')
         plt.xticks(rotation=90)
         plt.ylim(0, 2*pval_thrsh)
         plt.title('P-value plot for cluster ' + str(cluster))
@@ -457,7 +458,7 @@ def assign_celltypes(anndata, pval_thrsh=0.1):
     # Get clustering method used in ranked_genes_groups
     clust_method = anndata.uns['scoreCT']['clustering']
     # Initialize new metadata column in Anndata object
-    anndata.obs['Assigned type'] = ''
+    anndata.obs['scorect'] = ''
     # Iterate on clusters in dict_stats
     for cluster in anndata.uns['scoreCT']['pval_dict'].keys():
         # Get cell type with lowest pval
@@ -472,7 +473,7 @@ def assign_celltypes(anndata, pval_thrsh=0.1):
         else:
             assign_type = min(anndata.uns['scoreCT']['pval_dict'][cluster], key=anndata.uns['scoreCT']['pval_dict'][cluster].get)
         # Update
-        anndata.obs.loc[anndata.obs[clust_method] == str(cluster), 'Assigned type'] = assign_type
+        anndata.obs.loc[anndata.obs[clust_method] == str(cluster), 'scorect'] = assign_type
         anndata.uns['scoreCT']['pval_thrsh'] = pval_thrsh
 
-    return "Cell types assigned in Anndata.obs['Assigned types']"
+    return "Cell types assigned in Anndata.obs['scorect']"
