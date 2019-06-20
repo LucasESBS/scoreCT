@@ -67,22 +67,45 @@ definitions:
    
 functions:
     
-    score_cell_type(ranked_genes_cluster, marker_set)
-        output a single marker score (float)
-        
-    score_cell_types(ranked_genes_cluster: "rank gene Series for a cluster", ct_marker_dict)
-        scores a single cluster for all cell types
-        output a single row of the ct_scores_df
-   
-    randomize_ranking(background_genes)
-        output a ranked_genes_df
-    
-    random_score_compare(ct_scores_df, random_ct_scores_df)
-        output a binary matrix with 1 if score < random or 0 if score >= random
+    io/
 
-    assign_celltypes(ct_pvalue_df, cluster_assignment, cutoff)
-        output a pandas series where index is cell and value is cell type.
+        get_markers_from_db(species, tissue, url)
+            output a ct_marker_dict
         
+        read_markers_from_file(filename)
+            output a ct_marker_dict
+        
+        get_background_from_server(speices, tissue, url)
+            output a background_genes set
+            
+        read_background_from_file(filename)
+            output a background_genes set
+        
+        wrangle_ranks_from_anndata(anndata.uns['rank_genes_groups'])
+            output a ranked_genes_df
+        
+        read_ranks_from_file(filename)
+            output a ranked_genes_df
+            
+        
+    cell_type_annotation/
+        
+        score_cell_type(ranked_genes_cluster, marker_set)
+            output a single marker score (float)
+            
+        score_cell_types(ranked_genes_cluster: "rank gene Series for a cluster", ct_marker_dict)
+            scores a single cluster for all cell types
+            output a single row of the ct_scores_df
+       
+        randomize_ranking(background_genes)
+            output a ranked_genes_df
+        
+        random_score_compare(ct_scores_df, random_ct_scores_df)
+            output a binary matrix with 1 if score < random or 0 if score >= random
+    
+        assign_celltypes(ct_pvalue_df, cluster_assignment, cutoff)
+            output a pandas series where index is cell and value is cell type.
+            
 example of functional composition:
     
     def cell_type_scores(ranked_genes_df, ct_marker_dict):
