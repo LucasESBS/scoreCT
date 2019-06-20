@@ -51,7 +51,80 @@ ct.assign_celltypes(adata, dict_score)
 print(adata.obs)
 sc.pl.tsne(adata, color='scorect')
 """
+"""
+Notes on refactoring.
 
+definitions:
+
+   ranked_genes_df == pd.DataFrame (hugo genes X cluster) with sortable values
+   ct_marker_dict == dictionary of cell type ids (strs) pointing to sets of hugo gene names (strs)
+   cell_type_score == raw marker score float value
+   background_genes == A set of background genes used for randomization
+   cell_type_pvalue == pvalue calculated from cell_type_score
+   ct_scores_df == pd.DataFrame (cluster ids X cell type ids) with marker scores values
+   ct_pvalues_df == pd.DataFrame (cluster ids X cell type ids) with pvalue of association as values
+   ct_cell_assignment == pd.Series() of cells to cell type
+   
+functions:
+    
+    io/
+
+        get_markers_from_db(species, tissue, url)
+            output a ct_marker_dict
+        
+        read_markers_from_file(filename)
+            output a ct_marker_dict
+        
+        get_background_from_server(speices, tissue, url)
+            output a background_genes set
+            
+        read_background_from_file(filename)
+            output a background_genes set
+        
+        wrangle_ranks_from_anndata(anndata.uns['rank_genes_groups'])
+            output a ranked_genes_df
+        
+        read_ranks_from_file(filename)
+            output a ranked_genes_df
+            
+        
+    cell_type_annotation/
+        
+        score_cell_type(ranked_genes_cluster, marker_set)
+            output a single marker score (float)
+            
+        score_cell_types(ranked_genes_cluster: "rank gene Series for a cluster", ct_marker_dict)
+            scores a single cluster for all cell types
+            output a single row of the ct_scores_df
+       
+        randomize_ranking(background_genes)
+            output a ranked_genes_df
+        
+        random_score_compare(ct_scores_df, random_ct_scores_df)
+            output a binary matrix with 1 if score < random or 0 if score >= random
+    
+        assign_celltypes(ct_pvalue_df, cluster_assignment, cutoff)
+            output a pandas series where index is cell and value is cell type.
+            
+example of functional composition:
+    
+    def cell_type_scores(ranked_genes_df, ct_marker_dict):
+        return ranked_genes_df.apply(lambda row: score_cell_types(row, ct_marker_dict), axis=1)
+        
+    def cell_type_pvalues(ranked_genes_df, ct_marker_dict, background_genes, n_samples=100):
+        ct_scores_df = cell_type_scores(ranked_genes_df, ct_marker_dict)
+        ct_pvalues_df = pd.DataFrame(columns=ct_scores_df.columns, index=ct_scores_df.index).fillna(0)
+            
+        for sample in n_samples:
+            random_rankings = randomize_rankings(background_genes)
+            random_scores = cell_type_scores(random_rankings, ct_marker_df)
+            ct_pvalues_df += random_score_compare(ct_scores_df, random_scores)
+        
+        ct_pvalues_df /= float(n_samples)
+        
+        return ct_pvalues_df
+
+"""
 # Import packages
 import pandas as pd
 import numpy as np
