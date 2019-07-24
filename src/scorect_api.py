@@ -1,3 +1,39 @@
+#!/usr/bin/env python3
+
+# Lucas Seninge (lseninge)
+# Group members: Lucas Seninge
+# Last updated: 07-24-2019
+# File: scorect_api.py
+# Purpose: Automated scoring of cell types in scRNA-seq.
+# Author: Lucas Seninge (lseninge@ucsc.edu)
+# Credits for help to: Duncan McColl
+
+"""
+API automated cell type annotation in scRNA-seq pipeline.
+
+Example usage:
+
+# Load cell to cluster assignments (format: index is cell name and col 1 is clusters)
+cluster_assignment = pd.read_csv('cluster_assignment.csv')
+# Load reference markers (format: pd dataframe with cell types name as columns)
+ref_df = ct.read_markers_from_file('ref_marker.tsv')
+# Load gene ranks (format: a pd dataframe with at least columns 'gene' and 'cluster number')
+ranked_genes = ct.ranks_from_file('ranks.csv')
+# Load background genes into a list of genes
+bk_genes = ct.get_background_genes_file('background.txt')
+# Scoring
+ct_pval, ct_score = ct.celltype_scores(nb_bins=5,
+                                        ranked_genes=ranked_genes,
+                                        marker_ref=ref_df,
+                                        background_genes=bk_genes)
+# Assign - return a pandas Series object
+ct_assignment = ct.assign_celltypes(cluster_assignment=cluster_assignment,
+                                    ct_pval_df=ct_pval,
+                                    ct_score_df=ct_score,
+                                    cutoff=0.1)
+"""
+
+
 # Import packages
 import pandas as pd
 import numpy as np
@@ -9,6 +45,9 @@ import seaborn as sns
 
 
 # I/O functions
+from numpy.core.multiarray import ndarray
+
+
 def read_markers_from_file(filepath, ext=None):
     """
     Read a cell marker file from accepted file formats.
@@ -91,6 +130,7 @@ def get_markers_from_db(species, tissue, url=None):
 
 def get_background_genes_server(species, url=None):
     """
+    DEPRECATED
     Get background genes from server for null-hypothesis formulation.
     """
     # Convert name to lowercase to access
@@ -162,7 +202,7 @@ def _get_score_scale(nb_bins, scale='linear'):
     return scale_dict[scale](scores)
 
 
-def _score_one_celltype(nb_bins, ranked_genes, marker_list, score_scheme):
+def _score_one_celltype(nb_bins, ranked_genes, marker_list, background, score_scheme):
     """
     Helper function that scores one cell type for one cluster and take care of the bining.
     Returns a single score.
@@ -174,50 +214,48 @@ def _score_one_celltype(nb_bins, ranked_genes, marker_list, score_scheme):
     for k in range(nb_bins):
         sub_rank = ranked_genes[k*size_bin : (k*size_bin)+size_bin]
         score += (score_scheme[k] * len(set(sub_rank).intersection(set(marker_list))))
-    return score
+    # Get pvalue associated with return score
+    N = len(background)
+    K = len(ranked_genes)
+    n = len(set(marker_list).intersection(set(background)))
+    pval = _pval_from_null(score=score, N_genes=N, K_top=K, n_markers=n, m_bins=nb_bins)
+
+    return score, pval
 
 
-def _score_celltypes(nb_bins, ranked_genes, marker_ref, score_scheme):
+def _score_celltypes(nb_bins, ranked_genes, marker_ref, background, score_scheme):
     """
     Score all celltypes in the reference for one cluster.
     The reference is a dataframe with cell types as columns.
     """
     # Initialize empty score vector
     score_cluster = np.zeros((len(list(marker_ref)),))
+    pval_cluster = np.zeros((len(list(marker_ref)),))
     # Iterate on cell types
     celltypes = list(marker_ref)
     for i in range(len(celltypes)):
         # Score each cell type
-        score_ct = _score_one_celltype(nb_bins=nb_bins,
+        score_ct, pval_ct = _score_one_celltype(nb_bins=nb_bins,
                                        ranked_genes=ranked_genes,
                                        marker_list=marker_ref[celltypes[i]],
+                                       background=background,
                                        score_scheme=score_scheme)
         score_cluster[i] = score_ct
+        pval_cluster[i] = pval_ct
 
-    # Implement length correction here - ignore Na value if present in the ref
-    #len_vect = marker_ref.count().values
-    #return score_cluster/len_vect
-    return score_cluster
+    return score_cluster, pval_cluster
 
 
-def _randomize_ranking(ranked_genes, background_genes):
+def _pval_from_null(score, N_genes, K_top, n_markers, m_bins):
     """
-    Randomize genes in cluster gene rankings.
+    Get one tail test p-value associated to the input score given null hypothesis.
+    For a description of the null-model see documentation.
     """
-    copy_df = ranked_genes.copy()
-    # add code here to process cluster by cluster instead of the whole df in one time
-    # Without replacement
-    rd_pick = np.random.choice(background_genes, len(copy_df['gene']), replace=False)
-    copy_df['gene'] = rd_pick
-    return copy_df
-
-
-def _random_score_compare(ct_score_df, random_score_df):
-    """
-    Compare randomized ranking scores to initial scores and output binary df with 1 if random score is greater, 0 else.
-    """
-    binary_df = (ct_score_df <= random_score_df).astype(int)
-    return binary_df
+    # Define probability parameters
+    multi_dist = np.array([(N_genes-n_markers)/N_genes]+[(1-((N_genes-n_markers)/N_genes))/m_bins]*m_bins)
+    # Get polynomial coefficients of degree K
+    coeff = np.polynomial.polynomial.polypow(multi_dist, K_top)
+    return np.sum(coeff[score:])
 
 
 def assign_celltypes(ct_pval_df, ct_score_df, cluster_assignment, cutoff=0.1):
@@ -241,49 +279,30 @@ def assign_celltypes(ct_pval_df, ct_score_df, cluster_assignment, cutoff=0.1):
     return ct_assignments
 
 
-def celltype_scores(nb_bins, ranked_genes, marker_ref, score_scheme):
+def celltype_scores(nb_bins, ranked_genes, marker_ref, background_genes, scale='linear'):
     """
     Score every cluster in the ranking.
     """
+    # Initialize score scheme
+    score_scheme = _get_score_scale(nb_bins=nb_bins, scale=scale)
     # Initialize empty array for dataframe
     cluster_unique = np.unique(ranked_genes['cluster_number'].values)
     score_array = np.zeros((len(cluster_unique), len(list(marker_ref))))
+    pval_array = np.zeros((len(cluster_unique), len(list(marker_ref))))
     for cluster_i in cluster_unique:
         mask = ranked_genes['cluster_number'] == cluster_i
         valid_cluster = ranked_genes[mask]
-        cluster_scores = _score_celltypes(nb_bins=nb_bins,
+        cluster_scores, cluster_pval = _score_celltypes(nb_bins=nb_bins,
                                           ranked_genes=valid_cluster['gene'],
-                                          marker_ref=marker_ref,
+                                          marker_ref=marker_ref, background=background_genes,
                                           score_scheme=score_scheme)
+
         score_array[cluster_i, : ] = cluster_scores
+        pval_array[cluster_i, : ] = cluster_pval
     # Array to df
-    return pd.DataFrame(index=cluster_unique, data=score_array, columns=list(marker_ref))
-
-
-def celltype_pvalues(nb_bins, ranked_genes, marker_ref, background_genes, scale='linear', n_iter=1000):
-    """
-    Main function for collection scores and pvalues from ranking and reference.
-    """
-    # Get a score scheme
-    score_scheme = _get_score_scale(nb_bins=nb_bins, scale=scale)
-    # Get initial cluster scores
-    ct_scores_df = celltype_scores(nb_bins=nb_bins,
-                                   ranked_genes=ranked_genes,
-                                   marker_ref=marker_ref,
-                                   score_scheme=score_scheme)
-
-    # Initialize pvalue df for randomize scoring
-    ct_pvalues_df = pd.DataFrame(columns=ct_scores_df.columns, index=ct_scores_df.index).fillna(0)
-    for i in range(n_iter):
-        random_ranking = _randomize_ranking(ranked_genes=ranked_genes, background_genes=background_genes)
-        random_scores = celltype_scores(nb_bins=nb_bins,
-                                        ranked_genes=random_ranking,
-                                        marker_ref=marker_ref,
-                                        score_scheme=score_scheme)
-        ct_pvalues_df += _random_score_compare(ct_score_df=ct_scores_df, random_score_df=random_scores)
-
-    # Divide by number of iteration and return original scores and pvalue
-    return ct_pvalues_df/n_iter, ct_scores_df
+    score_df = pd.DataFrame(index=cluster_unique, data=score_array, columns=list(marker_ref))
+    pval_df = pd.DataFrame(index=cluster_unique, data=pval_array, columns=list(marker_ref))
+    return pval_df, score_df
 
 
 # Util functions : plotting, ...
