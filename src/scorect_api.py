@@ -195,18 +195,19 @@ def _score_celltypes(nb_bins, ranked_genes, marker_ref, score_scheme):
         score_cluster[i] = score_ct
 
     # Implement length correction here - ignore Na value if present in the ref
-    len_vect = marker_ref.count().values
-    return score_cluster/len_vect
+    #len_vect = marker_ref.count().values
+    #return score_cluster/len_vect
+    return score_cluster
 
 
 def _randomize_ranking(ranked_genes, background_genes):
     """
     Randomize genes in cluster gene rankings.
-    TO IMPROVE
     """
     copy_df = ranked_genes.copy()
     # add code here to process cluster by cluster instead of the whole df in one time
-    rd_pick = np.random.choice(background_genes, len(copy_df['gene']))
+    # Without replacement
+    rd_pick = np.random.choice(background_genes, len(copy_df['gene']), replace=False)
     copy_df['gene'] = rd_pick
     return copy_df
 
@@ -215,7 +216,7 @@ def _random_score_compare(ct_score_df, random_score_df):
     """
     Compare randomized ranking scores to initial scores and output binary df with 1 if random score is greater, 0 else.
     """
-    binary_df = (ct_score_df < random_score_df).astype(float)
+    binary_df = (ct_score_df <= random_score_df).astype(int)
     return binary_df
 
 
@@ -234,7 +235,7 @@ def assign_celltypes(ct_pval_df, ct_score_df, cluster_assignment, cutoff=0.1):
             clust_to_ct[cluster] = serie.index[min_idx[0]]
         else:
             # Subset the score_df
-            clust_to_ct[cluster] = ct_score_df.iloc[cluster].values[min_idx].idxmax()
+            clust_to_ct[cluster] = ct_score_df.iloc[cluster][min_idx].idxmax()
     # get a new pandas series with cell as indexes and cell type as value
     ct_assignments = cluster_assignment.map(clust_to_ct)
     return ct_assignments
@@ -244,17 +245,17 @@ def celltype_scores(nb_bins, ranked_genes, marker_ref, score_scheme):
     """
     Score every cluster in the ranking.
     """
-    # Initalize empty array for dataframe
+    # Initialize empty array for dataframe
     cluster_unique = np.unique(ranked_genes['cluster_number'].values)
-    score_array = np.zeros((len(cluster_unique),len(list(marker_ref))))
+    score_array = np.zeros((len(cluster_unique), len(list(marker_ref))))
     for cluster_i in cluster_unique:
         mask = ranked_genes['cluster_number'] == cluster_i
         valid_cluster = ranked_genes[mask]
         cluster_scores = _score_celltypes(nb_bins=nb_bins,
-                                          ranked_genes = valid_cluster['gene'],
+                                          ranked_genes=valid_cluster['gene'],
                                           marker_ref=marker_ref,
                                           score_scheme=score_scheme)
-        score_array[cluster_i,:] = cluster_scores
+        score_array[cluster_i, : ] = cluster_scores
     # Array to df
     return pd.DataFrame(index=cluster_unique, data=score_array, columns=list(marker_ref))
 
@@ -304,6 +305,13 @@ def plot_pvalue(pval_df, clusters, cutoff=0.1):
         plt.title('P-value plot for cluster ' + str(cluster))
         plt.show()
 
+
+def reassign_celltype(cluster_n, cell_type):
+    """
+    Function for the user to reassign a cell type. This decision can be motivated from investigating the pvalue plot
+    and/or the marker list for a certain cluster.
+    """
+    raise NotImplementedError
 
 
 
