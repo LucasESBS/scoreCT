@@ -89,7 +89,7 @@ def read_markers_gmt(filepath):
     with open(filepath) as file_gmt:
         for line in file_gmt:
             values = line.strip().split('\t')
-            ct_dict[values[0]] = values[1:]
+            ct_dict[values[0]] = values[2:]
     return pd.DataFrame({key:pd.Series(value) for key, value in ct_dict.items()})
 
 
@@ -174,7 +174,7 @@ def wrangle_ranks_from_anndata(anndata):
     top_gene = pd.DataFrame(anndata.uns['rank_genes_groups']['names']).loc[:nb_marker]
     marker_df = pd.DataFrame()
     # Order values
-    for i in range(len(top_score.columns)):
+    for i in top_score.columns:
         concat = pd.concat([top_score[[str(i)]], top_adjpval[str(i)], top_gene[[str(i)]]], axis=1, ignore_index=True)
         concat['cluster_number'] = i
         col = list(concat.columns)
