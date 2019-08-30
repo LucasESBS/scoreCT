@@ -45,9 +45,6 @@ import seaborn as sns
 
 
 # I/O functions
-from numpy.core.multiarray import ndarray
-
-
 def read_markers_from_file(filepath, ext=None):
     """
     Read a cell marker file from accepted file formats.
@@ -128,12 +125,13 @@ def get_markers_from_db(species, tissue, url=None):
     return ref_df
 
 
-def get_background_genes_server(species, url=None):
+def _get_background_genes_server(species, url=None):
     """
     DEPRECATED
     Get background genes from server for null-hypothesis formulation.
     """
     # Convert name to lowercase to access
+    raise DeprecationWarning('Deprecated. Background should be all the genes used in your analysis.')
     species = species.lower()
     if url is None:
         url = 'http://public.gi.ucsc.edu/~lseninge/' + species + '_genes.tsv'
@@ -279,19 +277,27 @@ def assign_celltypes(ct_pval_df, ct_score_df, cluster_assignment, cutoff=0.1):
     return ct_assignments
 
 
-def celltype_scores(nb_bins, ranked_genes, marker_ref, background_genes, scale='linear'):
+def celltype_scores(nb_bins, ranked_genes, K_top,  marker_ref, background_genes, scale='linear'):
     """
     Score every cluster in the ranking.
+    If a tuple is passed to K_top, it will be interpreted as (start,end). If a single integer is passed, start is 0.
     """
+    # Check bounds
+    if type(K_top) is tuple:
+        start, end = K_top[0], K_top[1]
+    elif type(K_top) is int:
+        start, end = 0, K_top
+    else:
+        raise ValueError('K_top should be an integer or a tuple representing bounds.')
     # Initialize score scheme
     score_scheme = _get_score_scale(nb_bins=nb_bins, scale=scale)
     # Initialize empty array for dataframe
     cluster_unique = np.unique(ranked_genes['cluster_number'].values)
     score_array = np.zeros((len(cluster_unique), len(list(marker_ref))))
     pval_array = np.zeros((len(cluster_unique), len(list(marker_ref))))
-    for cluster_i in cluster_unique:
-        mask = ranked_genes['cluster_number'] == cluster_i
-        valid_cluster = ranked_genes[mask]
+    for cluster_i in range(len(cluster_unique)):
+        mask = ranked_genes['cluster_number'] == cluster_unique[cluster_i]
+        valid_cluster = ranked_genes[mask][start:end]
         cluster_scores, cluster_pval = _score_celltypes(nb_bins=nb_bins,
                                           ranked_genes=valid_cluster['gene'],
                                           marker_ref=marker_ref, background=background_genes,
@@ -308,20 +314,21 @@ def celltype_scores(nb_bins, ranked_genes, marker_ref, background_genes, scale='
 # Util functions : plotting, ...
 def plot_pvalue(pval_df, clusters, cutoff=0.1):
     """
-    Dot plot of pvalue for each cell type in passed clusters.
+    Dot plot of -log10(pvalue) for each cell type in passed clusters.
     """
     # If only one cluster is input as int, convert to list
     if type(clusters) == int:
-        clusters = list(clusters)
+        clusters = [clusters]
     # Iterate
     for cluster in clusters:
         sub_serie = pval_df.iloc[cluster].sort_values(ascending=True)
         # Only plot cell types below cutoff
-        sub_serie = sub_serie[sub_serie.values < cutoff]
-        sns.scatterplot(sub_serie.index, sub_serie.values, marker='+', color='red', s=150)
-        plt.ylabel('P-value')
+        sub_serie = -np.log10(sub_serie[sub_serie.values < cutoff])
+        sns.scatterplot(sub_serie.index, sub_serie.values, marker='o', s=80)
+        plt.ylabel('-log10(p-value)')
         plt.xticks(rotation=60)
-        plt.title('P-value plot for cluster ' + str(cluster))
+        plt.title('-log10(p-value) plot for cluster ' + str(cluster))
+        plt.grid()
         plt.show()
 
 
