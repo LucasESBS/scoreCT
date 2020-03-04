@@ -271,7 +271,7 @@ def assign_celltypes(ct_pval_df, ct_score_df, cluster_assignment, cutoff=0.1):
             clust_to_ct[cluster] = serie.index[min_idx[0]]
         else:
             # Subset the score_df
-            clust_to_ct[cluster] = ct_score_df.iloc[cluster][min_idx].idxmax()
+            clust_to_ct[cluster] = ct_score_df.loc[cluster][min_idx].idxmax()
     # get a new pandas series with cell as indexes and cell type as value
     ct_assignments = cluster_assignment.map(clust_to_ct)
     return ct_assignments
