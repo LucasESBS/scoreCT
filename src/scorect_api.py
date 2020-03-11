@@ -49,7 +49,6 @@ def read_markers_from_file(filepath, ext=None):
     """
     Read a cell marker file from accepted file formats.
     Currently supported: csv, tsv.
-    To add: excel, gmt
     See doc for formatting.
     """
     # Get extension
@@ -161,7 +160,6 @@ def wrangle_ranks_from_anndata(anndata):
     """
     Wrangle results from the ranked_genes_groups function of Scanpy (Wolf et al., 2018) on louvain clusters.
     """
-
     # Get number of top ranked genes per groups
     nb_marker = len(anndata.uns['rank_genes_groups']['names'])
     print('Wrangling: Number of markers used in ranked_gene_groups: ', nb_marker)
@@ -200,7 +198,7 @@ def _get_score_scale(nb_bins, scale='linear'):
     return scale_dict[scale](scores)
 
 
-def _score_one_celltype(nb_bins, ranked_genes, marker_list, background, score_scheme):
+def _score_one_celltype(nb_bins, ranked_genes, marker_list, background, score_scheme, penalty_list=None):
     """
     Helper function that scores one cell type for one cluster and take care of the bining.
     Returns a single score.
@@ -212,6 +210,8 @@ def _score_one_celltype(nb_bins, ranked_genes, marker_list, background, score_sc
     for k in range(nb_bins):
         sub_rank = ranked_genes[k*size_bin : (k*size_bin)+size_bin]
         score += (score_scheme[k] * len(set(sub_rank).intersection(set(marker_list))))
+        if penalty_list is not None:
+            score -= (score_scheme[k] * len(set(sub_rank).intersection(set(penalty_list))))
     # Get pvalue associated with return score
     N = len(background)
     K = len(ranked_genes)
@@ -221,12 +221,16 @@ def _score_one_celltype(nb_bins, ranked_genes, marker_list, background, score_sc
     return score, pval
 
 
-def _score_celltypes(nb_bins, ranked_genes, marker_ref, background, score_scheme):
+def _score_celltypes(nb_bins, ranked_genes, marker_ref, background, score_scheme, penalty_ref=None):
     """
     Score all celltypes in the reference for one cluster.
     The reference is a dataframe with cell types as columns.
     """
     # Initialize empty score vector
+    if penalty_ref is not None:
+        penalty_list = penalty_ref[celltypes[i]]
+    else:
+        penalty_list = None
     score_cluster = np.zeros((len(list(marker_ref)),))
     pval_cluster = np.zeros((len(list(marker_ref)),))
     # Iterate on cell types
@@ -234,10 +238,11 @@ def _score_celltypes(nb_bins, ranked_genes, marker_ref, background, score_scheme
     for i in range(len(celltypes)):
         # Score each cell type
         score_ct, pval_ct = _score_one_celltype(nb_bins=nb_bins,
-                                       ranked_genes=ranked_genes,
-                                       marker_list=marker_ref[celltypes[i]],
-                                       background=background,
-                                       score_scheme=score_scheme)
+                                                ranked_genes=ranked_genes,
+                                                marker_list=marker_ref[celltypes[i]],
+                                                background=background,
+                                                penalty_list=penalty_list,
+                                                score_scheme=score_scheme)
         score_cluster[i] = score_ct
         pval_cluster[i] = pval_ct
 
@@ -277,10 +282,23 @@ def assign_celltypes(ct_pval_df, ct_score_df, cluster_assignment, cutoff=0.1):
     return ct_assignments
 
 
-def celltype_scores(nb_bins, ranked_genes, K_top,  marker_ref, background_genes, scale='linear'):
+def celltype_scores(nb_bins, ranked_genes, K_top,  marker_ref, background_genes, penalty_ref=None, scale='linear'):
     """
     Score every cluster in the ranking.
     If a tuple is passed to K_top, it will be interpreted as (start,end). If a single integer is passed, start is 0.
+
+    Args:
+        nb_bins (int): Number of bins to use to divide the gene ranking.
+        ranked_genes (pd.Df): Dataframe with ranked genes for each cluster (see docs).
+        K_top (int): Number of top genes to include in the scoring.
+        marker_ref (pd.Df): Reference table containing prior information on cell types and marker genes.
+        background_genes (list): list of all genes used in the dataset.
+        penalty_ref (pd.Df): (Optional) Reference table containing penalty markers for each cell type. If used, as to be
+            in the same format as marker_ref, with same columns.
+        scale (str): scoring scheme to be used. Default to linear.
+    Returns:
+        pval_df (pd.Df): Dataframe containing the pvalue associated with each celltype/cluster pair.
+        score_df (pd.Df): Dataframe containing the scores associated with each celltype/cluster pair.
     """
     # Check bounds
     if type(K_top) is tuple:
@@ -299,9 +317,12 @@ def celltype_scores(nb_bins, ranked_genes, K_top,  marker_ref, background_genes,
         mask = ranked_genes['cluster_number'] == cluster_unique[cluster_i]
         valid_cluster = ranked_genes[mask][start:end]
         cluster_scores, cluster_pval = _score_celltypes(nb_bins=nb_bins,
-                                          ranked_genes=valid_cluster['gene'],
-                                          marker_ref=marker_ref, background=background_genes,
-                                          score_scheme=score_scheme)
+                                                        ranked_genes=valid_cluster['gene'],
+                                                        marker_ref=marker_ref,
+                                                        background=background_genes,
+                                                        score_scheme=score_scheme,
+                                                        penalty_ref=penalty_ref
+                                                        )
 
         score_array[cluster_i, : ] = cluster_scores
         pval_array[cluster_i, : ] = cluster_pval
@@ -312,19 +333,21 @@ def celltype_scores(nb_bins, ranked_genes, K_top,  marker_ref, background_genes,
 
 
 # Util functions : plotting, ...
-def plot_pvalue(pval_df, clusters, cutoff=0.1):
+def plot_pvalue(pval_df, clusters, cutoff=0.1, n_types=None):
     """
     Dot plot of -log10(pvalue) for each cell type in passed clusters.
     """
     # If only one cluster is input as int, convert to list
     if type(clusters) == int:
         clusters = [clusters]
+    if n_types is None:
+        n_types = len(list(pval_df))
     # Iterate
     for cluster in clusters:
-        sub_serie = pval_df.iloc[cluster].sort_values(ascending=True)
+        sub_serie = pval_df.loc[cluster].sort_values(ascending=True)
         # Only plot cell types below cutoff
         sub_serie = -np.log10(sub_serie[sub_serie.values < cutoff])
-        sns.scatterplot(sub_serie.index, sub_serie.values, marker='o', s=80)
+        sns.scatterplot(sub_serie.index[:n_types], sub_serie.values[:n_types], marker='o', s=80)
         plt.ylabel('-log10(p-value)')
         plt.xticks(rotation=60)
         plt.title('-log10(p-value) plot for cluster ' + str(cluster))
