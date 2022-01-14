@@ -21,10 +21,20 @@ pip install scanpy
 
 ### Installing
 
+#### By cloning this repository
+
 Clone this repo in your home folder by running:
 
 ```
 git clone https://github.com/LucasESBS/scoreCT
+```
+
+#### With conda
+
+Use the following command to install with conda
+
+```
+conda install -c lucasesbs scorect
 ```
 
 See the jupyter notebook in the example folder to run an example. Example data are in scoreCT/data/
@@ -34,5 +44,3 @@ cd scoreCT/example
 jupyter notebook
 ```
 
-### News
-It is now possible to use the Cell Marker database (Zhang et al., 2019 : http://biocc.hrbmu.edu.cn/CellMarker/) as a reference for cell types / markers. See example notebook Option 3 on how to use it.
