@@ -29,6 +29,12 @@ Clone this repo in your home folder by running:
 git clone https://github.com/LucasESBS/scoreCT
 ```
 
+Then run:
+
+```
+python setup.py install
+```
+
 #### With conda
 
 Use the following command to install with conda
