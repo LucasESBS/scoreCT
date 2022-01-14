@@ -2,7 +2,7 @@
 
 # Lucas Seninge (lseninge)
 # Group members: Lucas Seninge
-# Last updated: 07-24-2019
+# Last updated: 01-13-2022
 # File: scorect_api.py
 # Purpose: Automated scoring of cell types in scRNA-seq.
 # Author: Lucas Seninge (lseninge@ucsc.edu)
@@ -194,7 +194,8 @@ def _get_score_scale(nb_bins, scale='linear'):
     Return a scoring scheme for the bins.
     """
     scores = np.arange(1, nb_bins+1)[::-1]
-    scale_dict = {'linear': np.array, 'square': np.square, 'log': np.log}
+    #scale_dict = {'linear': np.array, 'square': np.square, 'log': np.log}
+    scale_dict = {'linear':np.array}
     return scale_dict[scale](scores)
 
 
@@ -265,6 +266,8 @@ def assign_celltypes(ct_pval_df, ct_score_df, cluster_assignment, cutoff=0.1):
     """
     Assign a cell type to each cell based on its cluster assignment and the scoreCT results.
     """
+    # Make sure cluster assignments are categories and not int or something
+    cluster_assignment = cluster_assignment.astype('category')
     # Build dict cluster:cell type according to cutoff. Use score to break ties.
     clust_to_ct = {}
     for cluster, serie in ct_pval_df.iterrows():
@@ -282,7 +285,7 @@ def assign_celltypes(ct_pval_df, ct_score_df, cluster_assignment, cutoff=0.1):
     return ct_assignments
 
 
-def celltype_scores(nb_bins, ranked_genes, K_top,  marker_ref, background_genes, penalty_ref=None, scale='linear'):
+def celltype_scores(nb_bins, ranked_genes, K_top,  marker_ref, background_genes, penalty_ref=None):
     """
     Score every cluster in the ranking.
     If a tuple is passed to K_top, it will be interpreted as (start,end). If a single integer is passed, start is 0.
@@ -295,7 +298,6 @@ def celltype_scores(nb_bins, ranked_genes, K_top,  marker_ref, background_genes,
         background_genes (list): list of all genes used in the dataset.
         penalty_ref (pd.Df): (Optional) Reference table containing penalty markers for each cell type. If used, as to be
             in the same format as marker_ref, with same columns.
-        scale (str): scoring scheme to be used. Default to linear.
     Returns:
         pval_df (pd.Df): Dataframe containing the pvalue associated with each celltype/cluster pair.
         score_df (pd.Df): Dataframe containing the scores associated with each celltype/cluster pair.
@@ -308,7 +310,7 @@ def celltype_scores(nb_bins, ranked_genes, K_top,  marker_ref, background_genes,
     else:
         raise ValueError('K_top should be an integer or a tuple representing bounds.')
     # Initialize score scheme
-    score_scheme = _get_score_scale(nb_bins=nb_bins, scale=scale)
+    score_scheme = _get_score_scale(nb_bins=nb_bins, scale='linear')
     # Initialize empty array for dataframe
     cluster_unique = np.unique(ranked_genes['cluster_number'].values)
     score_array = np.zeros((len(cluster_unique), len(list(marker_ref))))
