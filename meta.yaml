@@ -1,0 +1,32 @@
+package:
+  name: "scorect"
+  version: "0.0.1"
+
+source:
+  git_rev: v0.0.1
+  git_url: https://github.com/LucasESBS/scoreCT
+
+requirements:
+  host:
+    - python
+    - setuptools
+  build:
+    - python
+  run:
+    - python
+    - pandas
+    - numpy
+    - requests
+    - matplotlib
+    - seaborn
+
+about:
+  home: https://github.com/LucasESBS/scoreCT
+  license: MIT
+  license_familY: MIT
+  license_file: LICENSE
+  summary: "Automated cell type annotation for scRNA-seq data in Scanpy"
+
+extra:
+  recipe-maintainers:
+    - LucasESBS
