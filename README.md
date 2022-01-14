@@ -43,6 +43,8 @@ Use the following command to install with conda
 conda install -c lucasesbs scorect
 ```
 
+### Tutorial
+
 See the jupyter notebook in the example folder to run an example. Example data are in scoreCT/data/
 
 ```
