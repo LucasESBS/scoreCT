@@ -6,7 +6,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="scorect",
-    version="0.0.1",
+    version="0.0.2",
     author="Lucas Seninge",
     author_email="lseninge@ucsc.edu",
     description="scoreCT: Automated cell type annotation in scRNA-seq data",

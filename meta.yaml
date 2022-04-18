@@ -24,7 +24,7 @@ about:
   home: https://github.com/LucasESBS/scoreCT
   license: MIT
   license_familY: MIT
-  license_file: LICENSE
+  license_file: LICENSE.md
   summary: "Automated cell type annotation for scRNA-seq data in Scanpy"
 
 extra:

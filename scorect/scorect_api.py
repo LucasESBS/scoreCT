@@ -2,43 +2,20 @@
 
 # Lucas Seninge (lseninge)
 # Group members: Lucas Seninge
-# Last updated: 01-13-2022
+# Last updated: 04-6-2022
 # File: scorect_api.py
 # Purpose: Automated scoring of cell types in scRNA-seq.
 # Author: Lucas Seninge (lseninge@ucsc.edu)
 # Credits for help to: Duncan McColl
 
-"""
-API automated cell type annotation in scRNA-seq pipeline.
-
-Example usage:
-
-# Load cell to cluster assignments (format: index is cell name and col 1 is clusters)
-cluster_assignment = pd.read_csv('cluster_assignment.csv')
-# Load reference markers (format: pd dataframe with cell types name as columns)
-ref_df = ct.read_markers_from_file('ref_marker.tsv')
-# Load gene ranks (format: a pd dataframe with at least columns 'gene' and 'cluster number')
-ranked_genes = ct.ranks_from_file('ranks.csv')
-# Load background genes into a list of genes
-bk_genes = ct.get_background_genes_file('background.txt')
-# Scoring
-ct_pval, ct_score = ct.celltype_scores(nb_bins=5,
-                                        ranked_genes=ranked_genes,
-                                        marker_ref=ref_df,
-                                        background_genes=bk_genes)
-# Assign - return a pandas Series object
-ct_assignment = ct.assign_celltypes(cluster_assignment=cluster_assignment,
-                                    ct_pval_df=ct_pval,
-                                    ct_score_df=ct_score,
-                                    cutoff=0.1)
-"""
-
 
 # Import packages
 import pandas as pd
 import numpy as np
+import scanpy as sc
 import requests
 import itertools
+import random
 import re
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -124,39 +101,7 @@ def get_markers_from_db(species, tissue, url=None):
     return ref_df
 
 
-def _get_background_genes_server(species, url=None):
-    """
-    DEPRECATED
-    Get background genes from server for null-hypothesis formulation.
-    """
-    # Convert name to lowercase to access
-    raise DeprecationWarning('Deprecated. Background should be all the genes used in your analysis.')
-    species = species.lower()
-    if url is None:
-        url = 'http://public.gi.ucsc.edu/~lseninge/' + species + '_genes.tsv'
-    response = requests.get(url)
-    gene_list = []
-    lines = response.iter_lines()
-    # Skip first line
-    next(lines)
-    for chunk in lines:
-        chunk = chunk.decode("utf-8")
-        gene_list.append(chunk)
-    return gene_list
-
-
-def get_background_genes_file(filepath):
-    """
-    Get background genes from local file for null-hypothesis formulation.
-    """
-    gene_list = []
-    with open(filepath) as file_gene:
-        for line in file_gene:
-            gene_list.append(line.strip())
-    return gene_list
-
-
-def wrangle_ranks_from_anndata(anndata):
+def wrangle_ranks_from_anndata(anndata, cluster_key='louvain'):
     """
     Wrangle results from the ranked_genes_groups function of Scanpy (Wolf et al., 2018) on louvain clusters.
     """
@@ -180,12 +125,25 @@ def wrangle_ranks_from_anndata(anndata):
     return marker_df
 
 
-def ranks_from_file(filepath, ext=None):
+def ranks_from_file(filepath, sep='\t'):
     """
     Read ranked genes per cluster from a file. Uses the read_markers_from_file api.
-    See doc for formatting.
+    Exepcts a file formatted as followed: each column is a cluster and genes are ranked in each column from top to bottom. Expects column headers for cluster labels (or number). See example file.
+
+    Parameters
+    ----------
+    filepath
+        path to file containing the ranked genes
+    sep
+        separator
     """
-    raise NotImplementedError
+    ranked_df = pd.read_csv(filepath, sep=sep, index_col=0)
+    clust = []
+    # Reformat to match scoreCT input format
+    for c in list(ranked_df):
+        clust += [c]*len(ranked_df)
+    genes = ranked_df.values.flatten(order='F')
+    return pd.DataFrame(index=np.arange(len(clust)), data={'cluster_number':clust, 'gene':genes})
 
 
 # Scoring functions
@@ -194,66 +152,90 @@ def _get_score_scale(nb_bins, scale='linear'):
     Return a scoring scheme for the bins.
     """
     scores = np.arange(1, nb_bins+1)[::-1]
-    #scale_dict = {'linear': np.array, 'square': np.square, 'log': np.log}
     scale_dict = {'linear':np.array}
     return scale_dict[scale](scores)
 
 
-def _score_one_celltype(nb_bins, ranked_genes, marker_list, background, score_scheme, penalty_list=None):
+def _score_one_celltype(nb_bins, ranked_genes, marker_list, background, score_scheme, ct_name, null_model, n_permutations):
     """
     Helper function that scores one cell type for one cluster and take care of the bining.
-    Returns a single score.
+    Returns a single score and associated p-value.
     """
-    # Initialize score
-    score = 0
-    # Iterate
-    size_bin = len(ranked_genes)//nb_bins
-    for k in range(nb_bins):
-        sub_rank = ranked_genes[k*size_bin : (k*size_bin)+size_bin]
-        score += (score_scheme[k] * len(set(sub_rank).intersection(set(marker_list))))
-        if penalty_list is not None:
-            score -= (score_scheme[k] * len(set(sub_rank).intersection(set(penalty_list))))
-    # Get pvalue associated with return score
+    # Get score
+    score = _score_function(top_genes=ranked_genes, 
+                            markers=marker_list,
+                            m_bins=nb_bins,
+                            score_scheme=score_scheme) 
+    # Get pvalue associated with returned score
     N = len(background)
     K = len(ranked_genes)
     n = len(set(marker_list).intersection(set(background)))
-    pval = _pval_from_null(score=score, N_genes=N, K_top=K, n_markers=n, m_bins=nb_bins)
-
+    # Check for which null model to use - tolerance value depends on n and N (n<<N)
+    if (n/N) > 3.33e-3 and null_model=='multinomial':
+        print('Marker genes number for %s is too big (n=%.i) for multinomial approximation to work. Switching to permutation test.'%(ct_name, n))
+        null_model='random'
+    # Get pvalue for null model
+    if null_model=='random':
+        pval = _pval_null_permutation(score=score, all_genes=background, markers=marker_list, K_top=K, m_bins=nb_bins, n_permutations=n_permutations)
+    else:
+        pval = _pval_null_multinomial(score=score, N_genes=N, K_top=K, n_markers=n, m_bins=nb_bins)
     return score, pval
 
 
-def _score_celltypes(nb_bins, ranked_genes, marker_ref, background, score_scheme, penalty_ref=None):
+def _score_celltypes(nb_bins, ranked_genes, marker_ref, background, score_scheme, null_model, n_permutations):
     """
     Score all celltypes in the reference for one cluster.
     The reference is a dataframe with cell types as columns.
     """
     # Initialize empty score vector
-    if penalty_ref is not None:
-        penalty_list = penalty_ref[celltypes[i]]
-    else:
-        penalty_list = None
     score_cluster = np.zeros((len(list(marker_ref)),))
     pval_cluster = np.zeros((len(list(marker_ref)),))
     # Iterate on cell types
     celltypes = list(marker_ref)
-    for i in range(len(celltypes)):
+    for i,c in enumerate(celltypes):
         # Score each cell type
         score_ct, pval_ct = _score_one_celltype(nb_bins=nb_bins,
                                                 ranked_genes=ranked_genes,
                                                 marker_list=marker_ref[celltypes[i]],
                                                 background=background,
-                                                penalty_list=penalty_list,
-                                                score_scheme=score_scheme)
+                                                score_scheme=score_scheme,
+                                                ct_name=c,
+                                                null_model=null_model,
+                                                n_permutations=n_permutations)
         score_cluster[i] = score_ct
         pval_cluster[i] = pval_ct
 
     return score_cluster, pval_cluster
 
-
-def _pval_from_null(score, N_genes, K_top, n_markers, m_bins):
+def _score_function(top_genes, markers, m_bins, score_scheme=None):
     """
-    Get one tail test p-value associated to the input score given null hypothesis.
-    For a description of the null-model see documentation.
+    scoreCT scoring function.
+    """
+    if score_scheme is None:
+        score_scheme = [i for i in range(1,m_bins+1)][::-1]
+    score = 0
+    size_bin = len(top_genes)//m_bins
+    for k in range(m_bins):
+        sub_rank = top_genes[k*size_bin : (k*size_bin)+size_bin]
+        score += (score_scheme[k] * len(set(sub_rank).intersection(set(markers))))
+    return score
+
+def _pval_null_permutation(score, all_genes, markers, K_top, m_bins, n_permutations):
+    """
+    Compute p-value from a permutation test. Gene ranking is randomized and score is re-computed N times to approximate the null distribution.
+    """
+    s_perm = []
+    for n in range(n_permutations):
+        perm_genes = random.sample(all_genes, len(all_genes))
+        top_genes = perm_genes[:K_top]
+        s = _score_function(top_genes, markers, m_bins)
+        s_perm.append(s)
+    return np.mean(np.array(s_perm)>=score)
+
+def _pval_null_multinomial(score, N_genes, K_top, n_markers, m_bins):
+    """
+    Get one tail test p-value associated to the input score given null hypothesis. This approximation only holds well for a small amount of markers (n<100). 
+    For a description of the multinomial null-model approximation see documentation.
     """
     # Define probability parameters
     multi_dist = np.array([(N_genes-n_markers)/N_genes]+[(1-((N_genes-n_markers)/N_genes))/m_bins]*m_bins)
@@ -285,23 +267,35 @@ def assign_celltypes(ct_pval_df, ct_score_df, cluster_assignment, cutoff=0.1):
     return ct_assignments
 
 
-def celltype_scores(nb_bins, ranked_genes, K_top,  marker_ref, background_genes, penalty_ref=None):
+def celltype_scores(nb_bins, ranked_genes, K_top,  marker_ref, background_genes, null_model='multinomial', n_permutations=1000):
     """
     Score every cluster in the ranking.
     If a tuple is passed to K_top, it will be interpreted as (start,end). If a single integer is passed, start is 0.
 
-    Args:
-        nb_bins (int): Number of bins to use to divide the gene ranking.
-        ranked_genes (pd.Df): Dataframe with ranked genes for each cluster (see docs).
-        K_top (int): Number of top genes to include in the scoring.
-        marker_ref (pd.Df): Reference table containing prior information on cell types and marker genes.
-        background_genes (list): list of all genes used in the dataset.
-        penalty_ref (pd.Df): (Optional) Reference table containing penalty markers for each cell type. If used, as to be
-            in the same format as marker_ref, with same columns.
-    Returns:
-        pval_df (pd.Df): Dataframe containing the pvalue associated with each celltype/cluster pair.
-        score_df (pd.Df): Dataframe containing the scores associated with each celltype/cluster pair.
+    Parameters
+    ----------
+        nb_bins
+            Number of bins to use to divide the gene ranking
+        ranked_genes
+            Dataframe with ranked genes for each cluster (see docs)
+        K_top
+            Number of top genes to include in the scoring
+        marker_ref
+            Reference table containing prior information on cell types and marker genes
+        background_genes
+            List of all genes used in the dataset
+        null_model
+            Null model to use for p-value computation. One of `random` or `multinomial`
+        n_permutations
+            Number of permutations for pvalue computation. Only used if ```null_model='random'```
+    Returns
+    -------
+        pval_df
+            Dataframe containing the pvalue associated with each celltype/cluster pair
+        score_df
+            Dataframe containing the scores associated with each celltype/cluster pair
     """
+    assert null_model in ['random','multinomial'], "null_model must be one of ['random','multinomial']"
     # Check bounds
     if type(K_top) is tuple:
         start, end = K_top[0], K_top[1]
@@ -309,7 +303,6 @@ def celltype_scores(nb_bins, ranked_genes, K_top,  marker_ref, background_genes,
         start, end = 0, K_top
     else:
         raise ValueError('K_top should be an integer or a tuple representing bounds.')
-    # Initialize score scheme
     score_scheme = _get_score_scale(nb_bins=nb_bins, scale='linear')
     # Initialize empty array for dataframe
     cluster_unique = np.unique(ranked_genes['cluster_number'].values)
@@ -323,7 +316,8 @@ def celltype_scores(nb_bins, ranked_genes, K_top,  marker_ref, background_genes,
                                                         marker_ref=marker_ref,
                                                         background=background_genes,
                                                         score_scheme=score_scheme,
-                                                        penalty_ref=penalty_ref
+                                                        null_model=null_model,
+                                                        n_permutations=n_permutations
                                                         )
 
         score_array[cluster_i, : ] = cluster_scores
@@ -332,6 +326,87 @@ def celltype_scores(nb_bins, ranked_genes, K_top,  marker_ref, background_genes,
     score_df = pd.DataFrame(index=cluster_unique, data=score_array, columns=list(marker_ref))
     pval_df = pd.DataFrame(index=cluster_unique, data=pval_array, columns=list(marker_ref))
     return pval_df, score_df
+
+
+
+# One liner API for end user
+def scorect(
+            adata,
+            marker_path,
+            K_top,
+            m_bins,
+            null_model='multinomial',
+            n_permutations=1000,
+            cluster_key='louvain',
+            pval_cutoff=0.1,
+            diff_kwargs=None,
+            return_copy=False
+            ):
+    """
+    Runs scoreCT annotation procedure on input AnnData object.
+    
+    Parameters
+    ----------
+    adata
+        input AnnData object
+    marker_path
+        path to marker genes file
+    K_top
+        number of top differential genes to consider
+    m_bins
+        number of bins to use for score
+    null_model
+        null model used for p-value computation. One of ['random','multinomial']
+    n_permutations
+        number of permutations for permutation test. Only used if null_model='random'
+    cluster_key
+        key in adata.obs with cluster labels/numbers
+    pval_cutoff
+        p-value cutoff to assign a cluster as 'NA'
+    diff_kwargs
+        kwargs to be passed to scanpy rank_gene_groups function (if not already ran by user)
+    return_copy
+        if True, a copy of adata is made and returned after scoreCT is ran
+    """
+    if return_copy:
+        adata = adata.copy()
+    adata.uns['_scorect'] = {}
+    # Check if rank_gene_groups as been ran
+    if 'rank_genes_groups' not in adata.uns.keys():
+        print('No differential test found in input AnnData object. Running Scanpy rank_gene_groups...')
+        if diff_kwargs is None:
+            print('Using default values for differential test')
+            diff_kwargs = {'groupby':cluster_key, 'n_genes':len(adata.raw.var), 'use_raw':True}
+        sc.tl.rank_genes_groups(adata, **diff_kwargs)
+    # Read marker file
+    print('Reading markers...')
+    markers = read_markers_from_file(marker_path)
+    background = adata.raw.var.index.tolist()
+    gene_df = wrangle_ranks_from_anndata(adata, cluster_key=cluster_key)
+    # Run scorect procedure
+    print('Scoring cell types in reference...')
+    ct_pval, ct_score = celltype_scores(nb_bins=m_bins,
+                                        ranked_genes=gene_df,
+                                        K_top = K_top,
+                                        marker_ref=markers,
+                                        background_genes=background,
+                                        null_model=null_model,
+                                        n_permutations=n_permutations
+                                        )
+    # Assign cell types
+    print("Assigning cell types in adata.obs['scoreCT']...")
+    ct_assign = assign_celltypes(cluster_assignment=adata.obs[cluster_key],
+                                 ct_pval_df=ct_pval,
+                                 ct_score_df=ct_score,
+                                 cutoff=pval_cutoff)
+    
+    adata.obs['scoreCT'] = ct_assign
+    # Store output in adata
+    adata.uns['_scorect']['pvals'] = ct_pval
+    adata.uns['_scorect']['scores'] = ct_score
+    if return_copy:
+        return adata
+    return
 
 
 # Util functions : plotting, ...
